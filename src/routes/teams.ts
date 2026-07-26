@@ -1,10 +1,11 @@
-import { Router, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { Team } from '../models/Team';
 import { User } from '../models/User';
 import { Invite } from '../models/Invite';
-import { authenticateJWT, AuthRequest } from '../middleware/auth';
+import { authenticateJWT } from '../middleware/auth';
+import type { AuthRequest } from '../middleware/auth';
 import { sendInviteEmail } from '../utils/mailer';
 
 const router = Router();

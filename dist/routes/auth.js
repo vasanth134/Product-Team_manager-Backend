@@ -7,8 +7,11 @@ const express_1 = require("express");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const zod_1 = require("zod");
+const crypto_1 = __importDefault(require("crypto"));
+const google_auth_library_1 = require("google-auth-library");
 const User_1 = require("../models/User");
 const auth_1 = require("../middleware/auth");
+const mailer_1 = require("../utils/mailer");
 const router = (0, express_1.Router)();
 const JWT_SECRET = process.env.JWT_SECRET || 'aether_jwt_secret_token_12345!';
 const signupSchema = zod_1.z.object({
@@ -156,5 +159,75 @@ router.put('/profile', auth_1.authenticateJWT, async (req, res) => {
         console.error('Update profile error:', error);
         return res.status(500).json({ error: 'Server error during profile update' });
     }
+});
+// @route   POST /api/auth/google
+// @desc    Authenticate with Google OAuth ID Token
+router.post('/google', async (req, res) => {
+    try {
+        const { credential, mockName, mockEmail } = req.body;
+        if (!credential) {
+            return res.status(400).json({ error: 'Credential token is required' });
+        }
+        let email = '';
+        let name = '';
+        let avatarUrl = '';
+        // Handle Mock Authentication for Developer Flow
+        if (credential.startsWith('mock_google_jwt_')) {
+            email = mockEmail?.toLowerCase() || 'mock.google@aether.io';
+            name = mockName || 'Mock Google User';
+            avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`;
+        }
+        else {
+            // Real Google Identity Verification
+            const googleClientId = process.env.GOOGLE_CLIENT_ID;
+            if (!googleClientId) {
+                return res.status(500).json({ error: 'Google OAuth is not configured on this server.' });
+            }
+            const client = new google_auth_library_1.OAuth2Client(googleClientId);
+            const ticket = await client.verifyIdToken({
+                idToken: credential,
+                audience: googleClientId,
+            });
+            const payload = ticket.getPayload();
+            if (!payload || !payload.email) {
+                return res.status(400).json({ error: 'Invalid Google token payload' });
+            }
+            email = payload.email.toLowerCase();
+            name = payload.name || email.split('@')[0];
+            avatarUrl = payload.picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`;
+        }
+        // Find or create Google User
+        let user = await User_1.User.findOne({ email });
+        if (!user) {
+            user = new User_1.User({
+                name,
+                email,
+                passwordHash: await bcryptjs_1.default.hash(crypto_1.default.randomBytes(16).toString('hex'), 10),
+                avatarUrl,
+                role: 'Developer'
+            });
+            await user.save();
+        }
+        const token = jsonwebtoken_1.default.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+        return res.status(200).json({
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                avatarUrl: user.avatarUrl,
+                role: user.role
+            }
+        });
+    }
+    catch (error) {
+        console.error('Google OAuth error:', error);
+        return res.status(500).json({ error: 'Authentication failed during Google login' });
+    }
+});
+// @route   GET /api/auth/dev/emails
+// @desc    Dev-mailbox endpoint to retrieve mocked emails (Dev Only)
+router.get('/dev/emails', (_req, res) => {
+    res.json(mailer_1.devEmailsList);
 });
 exports.default = router;

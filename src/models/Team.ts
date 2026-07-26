@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface ITeamMember {
   user: mongoose.Types.ObjectId;
@@ -24,4 +24,4 @@ const TeamSchema = new Schema<ITeam>({
   }]
 }, { timestamps: true });
 
-export const Team = mongoose.models.Team || mongoose.model<ITeam>('Team', TeamSchema);
+export const Team = (mongoose.models.Team || mongoose.model<ITeam>('Team', TeamSchema)) as Model<ITeam>;

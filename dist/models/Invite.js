@@ -33,15 +33,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Team = void 0;
+exports.Invite = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
-const TeamSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    description: { type: String, default: '' },
-    owner: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    members: [{
-            user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-            role: { type: String, enum: ['owner', 'admin', 'member'], default: 'member' }
-        }]
+const InviteSchema = new mongoose_1.Schema({
+    email: { type: String, required: true, index: true },
+    team: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Team', required: true },
+    role: { type: String, enum: ['admin', 'member'], default: 'member' },
+    token: { type: String, required: true, unique: true, index: true },
+    invitedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    status: { type: String, enum: ['pending', 'accepted'], default: 'pending' },
+    createdAt: { type: Date, default: Date.now, expires: 604800 } // 7 days TTL
 }, { timestamps: true });
-exports.Team = (mongoose_1.default.models.Team || mongoose_1.default.model('Team', TeamSchema));
+exports.Invite = (mongoose_1.default.models.Invite || mongoose_1.default.model('Invite', InviteSchema));

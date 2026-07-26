@@ -43,7 +43,11 @@ const authenticateJWT = async (req, res, next) => {
     }
     catch (err) {
         console.error('Bypassed auth error:', err);
-        next();
+        // If DB is unavailable, return a clear error instead of proceeding with
+        // undefined userId which causes confusing downstream validation failures.
+        return res.status(503).json({
+            error: 'Database unavailable. Please try again later.'
+        });
     }
 };
 exports.authenticateJWT = authenticateJWT;

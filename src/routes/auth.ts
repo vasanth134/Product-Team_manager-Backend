@@ -1,11 +1,12 @@
-import { Router, Response } from 'express';
+import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { User } from '../models/User';
-import { authenticateJWT, AuthRequest } from '../middleware/auth';
+import { authenticateJWT } from '../middleware/auth';
+import type { AuthRequest } from '../middleware/auth';
 import { devEmailsList } from '../utils/mailer';
 
 const router = Router();
@@ -247,7 +248,7 @@ router.post('/google', async (req, res): Promise<any> => {
 
 // @route   GET /api/auth/dev/emails
 // @desc    Dev-mailbox endpoint to retrieve mocked emails (Dev Only)
-router.get('/dev/emails', (req, res) => {
+router.get('/dev/emails', (_req, res) => {
   res.json(devEmailsList);
 });
 
