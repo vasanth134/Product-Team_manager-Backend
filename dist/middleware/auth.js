@@ -23,8 +23,14 @@ const authenticateJWT = async (req, res, next) => {
             return next();
         }
         catch (err) {
+            if (process.env.NODE_ENV === 'production') {
+                return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+            }
             // If verification fails, proceed to default user fallback instead of returning 403
         }
+    }
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(401).json({ error: 'Unauthorized: Access token is missing or invalid' });
     }
     // Fallback: Use the first user in the database or create a default one
     try {

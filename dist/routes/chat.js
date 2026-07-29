@@ -9,6 +9,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const cloudinary_1 = require("cloudinary");
 const Message_1 = require("../models/Message");
+const Team_1 = require("../models/Team");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 // ─── Cloudinary Setup ────────────────────────────────────────────────────────
@@ -71,12 +72,21 @@ router.post('/upload', auth_1.authenticateJWT, upload.single('file'), async (req
         return res.status(500).json({ error: error.message || 'Upload failed' });
     }
 });
+// Helper check to verify if the user belongs to the team
+async function userBelongsToTeam(userId, teamId) {
+    const team = await Team_1.Team.findOne({ _id: teamId, 'members.user': userId });
+    return !!team;
+}
 // ─── GET /api/chat/messages?teamId=xxx&before=<msgId>&limit=50 ───────────────
 router.get('/messages', auth_1.authenticateJWT, async (req, res) => {
     try {
         const { teamId, before, limit = '50' } = req.query;
         if (!teamId)
             return res.status(400).json({ error: 'teamId is required' });
+        // Validate team membership
+        if (!(await userBelongsToTeam(req.userId, teamId))) {
+            return res.status(403).json({ error: 'Access denied: You are not a member of this team' });
+        }
         const query = { teamId };
         if (before)
             query._id = { $lt: before };

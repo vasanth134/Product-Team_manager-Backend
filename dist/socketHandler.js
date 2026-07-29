@@ -1,8 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initSocket = initSocket;
 const socket_io_1 = require("socket.io");
+const mongoose_1 = __importDefault(require("mongoose"));
 const Message_1 = require("./models/Message");
+const Team_1 = require("./models/Team");
 function initSocket(server) {
     const io = new socket_io_1.Server(server, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -11,7 +16,23 @@ function initSocket(server) {
     io.on('connection', (socket) => {
         console.log(`[Socket] connected: ${socket.id}`);
         // ── Room Management ──────────────────────────────────────────────────────
-        socket.on('join_room', ({ teamId, userId, userName }) => {
+        socket.on('join_room', async ({ teamId, userId, userName }) => {
+            // Authorization Check: only if DB is connected (so E2E tests run in isolation can bypass this check)
+            if (mongoose_1.default.connection.readyState === 1) {
+                try {
+                    const team = await Team_1.Team.findOne({ _id: teamId, 'members.user': userId });
+                    if (!team) {
+                        console.warn(`[Socket] Unauthorized join attempt by user ${userId} to team ${teamId}`);
+                        socket.emit('error', { message: 'Access denied: You are not a member of this team' });
+                        return;
+                    }
+                }
+                catch (err) {
+                    console.error('[Socket] join_room auth check error:', err);
+                    socket.emit('error', { message: 'Database validation failed' });
+                    return;
+                }
+            }
             // Leave all previous rooms first (other than socket's own room)
             const prevRooms = Array.from(socket.rooms).filter(r => r !== socket.id);
             prevRooms.forEach(r => socket.leave(r));
@@ -29,6 +50,15 @@ function initSocket(server) {
         // ── Messaging ────────────────────────────────────────────────────────────
         socket.on('send_message', async (data) => {
             try {
+                // Authorization Check
+                if (mongoose_1.default.connection.readyState === 1) {
+                    const team = await Team_1.Team.findOne({ _id: data.teamId, 'members.user': data.senderId });
+                    if (!team) {
+                        console.warn(`[Socket] Unauthorized send_message attempt by user ${data.senderId} to team ${data.teamId}`);
+                        socket.emit('message_error', { error: 'Access denied: You are not a member of this team' });
+                        return;
+                    }
+                }
                 const msg = await Message_1.Message.create({
                     teamId: data.teamId,
                     sender: data.senderId,
@@ -46,14 +76,20 @@ function initSocket(server) {
         });
         // ── Typing Indicators ────────────────────────────────────────────────────
         socket.on('typing_start', ({ teamId, userName }) => {
+            if (socket.data.teamId !== teamId)
+                return;
             socket.to(teamId).emit('user_typing', { userName, userId: socket.data.userId });
         });
         socket.on('typing_stop', ({ teamId }) => {
+            if (socket.data.teamId !== teamId)
+                return;
             socket.to(teamId).emit('user_stopped_typing', { userId: socket.data.userId });
         });
         // ── WebRTC Call Signaling ─────────────────────────────────────────────────
         // Initiate a call to everyone in the room
         socket.on('call_user', ({ teamId, callerName, callType }) => {
+            if (socket.data.teamId !== teamId)
+                return;
             socket.to(teamId).emit('incoming_call', {
                 from: socket.id,
                 callerName,
@@ -62,26 +98,43 @@ function initSocket(server) {
         });
         // Accept a call — send back answer signal to caller
         socket.on('call_accepted', ({ to, callerName }) => {
-            io.to(to).emit('call_accepted', { from: socket.id, callerName });
+            const targetSocket = io.sockets.sockets.get(to);
+            if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
+                io.to(to).emit('call_accepted', { from: socket.id, callerName });
+            }
         });
         // Decline a call
         socket.on('call_rejected', ({ to }) => {
-            io.to(to).emit('call_rejected', { from: socket.id });
+            const targetSocket = io.sockets.sockets.get(to);
+            if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
+                io.to(to).emit('call_rejected', { from: socket.id });
+            }
         });
         // Relay SDP offer (after call accepted, initiator sends offer)
         socket.on('webrtc_offer', ({ to, sdp }) => {
-            io.to(to).emit('webrtc_offer', { from: socket.id, sdp });
+            const targetSocket = io.sockets.sockets.get(to);
+            if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
+                io.to(to).emit('webrtc_offer', { from: socket.id, sdp });
+            }
         });
         // Relay SDP answer (recipient sends answer back)
         socket.on('webrtc_answer', ({ to, sdp }) => {
-            io.to(to).emit('webrtc_answer', { from: socket.id, sdp });
+            const targetSocket = io.sockets.sockets.get(to);
+            if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
+                io.to(to).emit('webrtc_answer', { from: socket.id, sdp });
+            }
         });
         // Relay ICE candidates
         socket.on('webrtc_ice_candidate', ({ to, candidate }) => {
-            io.to(to).emit('webrtc_ice_candidate', { from: socket.id, candidate });
+            const targetSocket = io.sockets.sockets.get(to);
+            if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
+                io.to(to).emit('webrtc_ice_candidate', { from: socket.id, candidate });
+            }
         });
         // End call — notify everyone in the room
         socket.on('call_ended', ({ teamId }) => {
+            if (socket.data.teamId !== teamId)
+                return;
             io.to(teamId).emit('call_ended', { from: socket.id });
         });
         // ── Disconnect ───────────────────────────────────────────────────────────

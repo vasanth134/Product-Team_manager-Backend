@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { v2 as cloudinary } from 'cloudinary';
 import { Message } from '../models/Message';
+import { Team } from '../models/Team';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -76,11 +77,22 @@ router.post('/upload', authenticateJWT, upload.single('file'), async (req: AuthR
   }
 });
 
+// Helper check to verify if the user belongs to the team
+async function userBelongsToTeam(userId: string, teamId: string): Promise<boolean> {
+  const team = await Team.findOne({ _id: teamId, 'members.user': userId });
+  return !!team;
+}
+
 // ─── GET /api/chat/messages?teamId=xxx&before=<msgId>&limit=50 ───────────────
 router.get('/messages', authenticateJWT, async (req: AuthRequest, res: Response): Promise<any> => {
   try {
     const { teamId, before, limit = '50' } = req.query as Record<string, string>;
     if (!teamId) return res.status(400).json({ error: 'teamId is required' });
+
+    // Validate team membership
+    if (!(await userBelongsToTeam(req.userId!, teamId))) {
+      return res.status(403).json({ error: 'Access denied: You are not a member of this team' });
+    }
 
     const query: any = { teamId };
     if (before) query._id = { $lt: before };

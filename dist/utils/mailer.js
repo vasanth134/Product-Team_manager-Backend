@@ -21,13 +21,9 @@ const sendInviteEmail = async (to, teamName, inviterName, inviteLink) => {
         link: inviteLink,
         timestamp: new Date()
     });
-    // Log locally to static upload directory
+    // Log locally to root directory (not exposed statically to the public)
     try {
-        const logPath = path_1.default.join(process.cwd(), 'public', 'uploads', 'emails.log');
-        const logDir = path_1.default.dirname(logPath);
-        if (!fs_1.default.existsSync(logDir)) {
-            fs_1.default.mkdirSync(logDir, { recursive: true });
-        }
+        const logPath = path_1.default.join(process.cwd(), 'emails.log');
         fs_1.default.appendFileSync(logPath, `[${new Date().toISOString()}] To: ${to} | Link: ${inviteLink}\n`);
     }
     catch (err) {

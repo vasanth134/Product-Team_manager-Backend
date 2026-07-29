@@ -228,6 +228,9 @@ router.post('/google', async (req, res) => {
 // @route   GET /api/auth/dev/emails
 // @desc    Dev-mailbox endpoint to retrieve mocked emails (Dev Only)
 router.get('/dev/emails', (_req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ error: 'Access denied: Developer mailbox is disabled in production.' });
+    }
     res.json(mailer_1.devEmailsList);
 });
 exports.default = router;

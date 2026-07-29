@@ -28,13 +28,9 @@ export const sendInviteEmail = async (to: string, teamName: string, inviterName:
     timestamp: new Date()
   });
 
-  // Log locally to static upload directory
+  // Log locally to root directory (not exposed statically to the public)
   try {
-    const logPath = path.join(process.cwd(), 'public', 'uploads', 'emails.log');
-    const logDir = path.dirname(logPath);
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
+    const logPath = path.join(process.cwd(), 'emails.log');
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] To: ${to} | Link: ${inviteLink}\n`);
   } catch (err) {
     console.error('Failed to log email to disk:', err);
