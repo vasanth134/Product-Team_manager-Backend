@@ -12,6 +12,41 @@ function initSocket(server) {
     const io = new socket_io_1.Server(server, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
     });
+    const activeCalls = new Map(); // teamId -> ActiveCall
+    async function endCallSession(teamId) {
+        const call = activeCalls.get(teamId);
+        if (!call)
+            return;
+        activeCalls.delete(teamId);
+        const now = new Date();
+        const duration = call.connectedAt
+            ? Math.round((now.getTime() - call.connectedAt.getTime()) / 1000)
+            : 0;
+        try {
+            const msgText = duration > 0
+                ? `Call ended · ${duration}s`
+                : `Call missed`;
+            const msg = await Message_1.Message.create({
+                teamId: call.teamId,
+                sender: call.callerUserId,
+                text: msgText,
+                isCallHistory: true,
+                callHistory: {
+                    callType: call.callType,
+                    duration,
+                    joinedParticipants: Array.from(call.participants),
+                    startedAt: call.startedAt,
+                    endedAt: now,
+                }
+            });
+            const populated = await Message_1.Message.findById(msg._id)
+                .populate('sender', 'name avatarUrl');
+            io.to(call.teamId).emit('new_message', populated);
+        }
+        catch (err) {
+            console.error('[Socket] Failed to save call history message:', err);
+        }
+    }
     // Track which socket belongs to which user+team
     io.on('connection', (socket) => {
         console.log(`[Socket] connected: ${socket.id}`);
@@ -90,9 +125,21 @@ function initSocket(server) {
         socket.on('call_user', ({ teamId, callerName, callType }) => {
             if (socket.data.teamId !== teamId)
                 return;
+            // Initialize the call session
+            const name = callerName || socket.data.userName || 'Unknown';
+            activeCalls.set(teamId, {
+                teamId,
+                callType,
+                callerId: socket.id,
+                callerUserId: socket.data.userId,
+                callerName: name,
+                startedAt: new Date(),
+                participants: new Set([name]),
+                socketToUser: new Map([[socket.id, { userId: socket.data.userId, userName: name }]]),
+            });
             socket.to(teamId).emit('incoming_call', {
                 from: socket.id,
-                callerName,
+                callerName: name,
                 callType,
             });
         });
@@ -101,14 +148,25 @@ function initSocket(server) {
             const targetSocket = io.sockets.sockets.get(to);
             if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
                 io.to(to).emit('call_accepted', { from: socket.id, callerName });
+                const call = activeCalls.get(socket.data.teamId);
+                if (call) {
+                    if (!call.connectedAt) {
+                        call.connectedAt = new Date();
+                    }
+                    const name = callerName || socket.data.userName || 'Unknown';
+                    call.participants.add(name);
+                    call.socketToUser.set(socket.id, { userId: socket.data.userId, userName: name });
+                }
             }
         });
         // Decline a call
-        socket.on('call_rejected', ({ to }) => {
+        socket.on('call_rejected', async ({ to }) => {
             const targetSocket = io.sockets.sockets.get(to);
             if (targetSocket && targetSocket.data.teamId === socket.data.teamId) {
                 io.to(to).emit('call_rejected', { from: socket.id });
             }
+            // If a call is declined and no connection occurred, end the session
+            await endCallSession(socket.data.teamId);
         });
         // Relay SDP offer (after call accepted, initiator sends offer)
         socket.on('webrtc_offer', ({ to, sdp }) => {
@@ -132,21 +190,26 @@ function initSocket(server) {
             }
         });
         // End call — notify everyone in the room
-        socket.on('call_ended', ({ teamId }) => {
+        socket.on('call_ended', async ({ teamId }) => {
             if (socket.data.teamId !== teamId)
                 return;
             io.to(teamId).emit('call_ended', { from: socket.id });
+            await endCallSession(teamId);
         });
         // ── Disconnect ───────────────────────────────────────────────────────────
-        socket.on('disconnect', () => {
+        socket.on('disconnect', async () => {
             console.log(`[Socket] disconnected: ${socket.id}`);
             if (socket.data.teamId) {
                 socket.to(socket.data.teamId).emit('user_left', {
                     userId: socket.data.userId,
                     userName: socket.data.userName,
                 });
-                // Also end any active call
-                socket.to(socket.data.teamId).emit('call_ended', { from: socket.id });
+                // If this socket was a participant in an active call, end the call
+                const call = activeCalls.get(socket.data.teamId);
+                if (call && call.socketToUser.has(socket.id)) {
+                    socket.to(socket.data.teamId).emit('call_ended', { from: socket.id });
+                    await endCallSession(socket.data.teamId);
+                }
             }
         });
     });

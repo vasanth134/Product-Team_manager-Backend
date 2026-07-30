@@ -40,10 +40,19 @@ const AttachmentSchema = new mongoose_1.Schema({
     url: { type: String, required: true },
     name: { type: String, default: '' },
 }, { _id: false });
+const CallHistorySchema = new mongoose_1.Schema({
+    callType: { type: String, enum: ['audio', 'video'], required: true },
+    duration: { type: Number, required: true },
+    joinedParticipants: { type: [String], default: [] },
+    startedAt: { type: Date, required: true },
+    endedAt: { type: Date, required: true },
+}, { _id: false });
 const MessageSchema = new mongoose_1.Schema({
     teamId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Team', required: true, index: true },
     sender: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, default: '' },
     attachments: { type: [AttachmentSchema], default: [] },
+    isCallHistory: { type: Boolean, default: false },
+    callHistory: { type: CallHistorySchema, default: undefined },
 }, { timestamps: true });
 exports.Message = (mongoose_1.default.models.Message || mongoose_1.default.model('Message', MessageSchema));
