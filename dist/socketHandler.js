@@ -296,6 +296,12 @@ function initSocket(server) {
                 return;
             await removeParticipantFromCall(teamId, socket.id);
         });
+        // Relay screen sharing status
+        socket.on('screen_share_status', ({ teamId, isSharing }) => {
+            if (socket.data.teamId !== teamId)
+                return;
+            socket.to(teamId).emit('screen_share_status', { socketId: socket.id, isSharing });
+        });
         // ── Disconnect ───────────────────────────────────────────────────────────
         socket.on('disconnect', async () => {
             console.log(`[Socket] disconnected: ${socket.id}`);
