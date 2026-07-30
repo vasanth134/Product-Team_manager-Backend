@@ -8,6 +8,7 @@ import { Task } from '../models/Task';
 import { Milestone } from '../models/Milestone';
 import { Standup } from '../models/Standup';
 import { Message } from '../models/Message';
+import { Channel } from '../models/Channel';
 import { authenticateJWT } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import { sendInviteEmail } from '../utils/mailer';
@@ -384,6 +385,76 @@ router.delete('/:teamId/invites/:inviteId', authenticateJWT, async (req: AuthReq
     return res.status(200).json({ message: 'Invitation revoked successfully' });
   } catch (error) {
     console.error('Revoke invite error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   GET /api/teams/:teamId/channels
+// @desc    Get all channels in the team. Auto-creates a General channel if none exist.
+router.get('/:teamId/channels', authenticateJWT, async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { teamId } = req.params;
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+
+    const requester = team.members.find(m => m.user.toString() === req.userId);
+    if (!requester) {
+      return res.status(403).json({ error: 'Access denied: Not a member of this team' });
+    }
+
+    let channels = await Channel.find({ teamId });
+    if (channels.length === 0) {
+      const generalChannel = new Channel({
+        name: 'General',
+        description: 'Default general room for chat',
+        teamId: team._id,
+        createdBy: team.owner
+      });
+      await generalChannel.save();
+      channels = [generalChannel];
+    }
+
+    return res.status(200).json(channels);
+  } catch (error) {
+    console.error('Get channels error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   POST /api/teams/:teamId/channels
+// @desc    Create a new channel in the team
+router.post('/:teamId/channels', authenticateJWT, async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { teamId } = req.params;
+    const { name, description } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Channel name is required' });
+    }
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+
+    const requester = team.members.find(m => m.user.toString() === req.userId);
+    if (!requester) {
+      return res.status(403).json({ error: 'Access denied: Not a member of this team' });
+    }
+
+    const newChannel = new Channel({
+      name: name.trim(),
+      description: description || '',
+      teamId: team._id,
+      createdBy: req.userId
+    });
+
+    await newChannel.save();
+    return res.status(201).json(newChannel);
+  } catch (error) {
+    console.error('Create channel error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

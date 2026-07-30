@@ -16,6 +16,7 @@ export interface ICallHistory {
 
 export interface IMessage extends Document {
   teamId: mongoose.Types.ObjectId;
+  channelId?: mongoose.Types.ObjectId;
   sender: mongoose.Types.ObjectId;
   text?: string;
   attachments: IAttachment[];
@@ -41,6 +42,7 @@ const CallHistorySchema = new Schema<ICallHistory>({
 
 const MessageSchema = new Schema<IMessage>({
   teamId:      { type: Schema.Types.ObjectId, ref: 'Team', required: true, index: true },
+  channelId:   { type: Schema.Types.ObjectId, ref: 'Channel', required: false, index: true },
   sender:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
   text:        { type: String, default: '' },
   attachments: { type: [AttachmentSchema], default: [] },

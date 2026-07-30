@@ -5,6 +5,8 @@ import fs from 'fs';
 import { v2 as cloudinary } from 'cloudinary';
 import { Message } from '../models/Message';
 import { Team } from '../models/Team';
+import { Channel } from '../models/Channel';
+import { Notification } from '../models/Notification';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -83,10 +85,10 @@ async function userBelongsToTeam(userId: string, teamId: string): Promise<boolea
   return !!team;
 }
 
-// ─── GET /api/chat/messages?teamId=xxx&before=<msgId>&limit=50 ───────────────
+// ─── GET /api/chat/messages?teamId=xxx&channelId=yyy&before=<msgId>&limit=50 ───────────────
 router.get('/messages', authenticateJWT, async (req: AuthRequest, res: Response): Promise<any> => {
   try {
-    const { teamId, before, limit = '50' } = req.query as Record<string, string>;
+    const { teamId, channelId, before, limit = '50' } = req.query as Record<string, string>;
     if (!teamId) return res.status(400).json({ error: 'teamId is required' });
 
     // Validate team membership
@@ -95,6 +97,18 @@ router.get('/messages', authenticateJWT, async (req: AuthRequest, res: Response)
     }
 
     const query: any = { teamId };
+    if (channelId) {
+      const channel = await Channel.findById(channelId);
+      if (channel && channel.name === 'General') {
+        query.$or = [
+          { channelId: channel._id },
+          { channelId: { $exists: false } },
+          { channelId: null }
+        ];
+      } else {
+        query.channelId = channelId;
+      }
+    }
     if (before) query._id = { $lt: before };
 
     const messages = await Message.find(query)
@@ -105,6 +119,41 @@ router.get('/messages', authenticateJWT, async (req: AuthRequest, res: Response)
     return res.status(200).json(messages.reverse());
   } catch (error) {
     console.error('Fetch messages error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   GET /api/chat/notifications
+// @desc    Get unread notifications for current user
+router.get('/notifications', authenticateJWT, async (req: AuthRequest, res: Response): Promise<any> => {
+  try {
+    const notifications = await Notification.find({ recipient: req.userId, isRead: false })
+      .populate('sender', 'name avatarUrl')
+      .populate('teamId', 'name')
+      .populate('channelId', 'name')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json(notifications);
+  } catch (error) {
+    console.error('Fetch notifications error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   POST /api/chat/notifications/mark-read
+// @desc    Mark notifications as read
+router.post('/notifications/mark-read', authenticateJWT, async (req: AuthRequest, res: Response): Promise<any> => {
+  try {
+    const { notificationIds } = req.body;
+    const query: any = { recipient: req.userId };
+    if (Array.isArray(notificationIds) && notificationIds.length > 0) {
+      query._id = { $in: notificationIds };
+    }
+
+    await Notification.updateMany(query, { $set: { isRead: true } });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Mark notifications read error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });
