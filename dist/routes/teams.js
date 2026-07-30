@@ -13,6 +13,7 @@ const Task_1 = require("../models/Task");
 const Milestone_1 = require("../models/Milestone");
 const Standup_1 = require("../models/Standup");
 const Message_1 = require("../models/Message");
+const Channel_1 = require("../models/Channel");
 const auth_1 = require("../middleware/auth");
 const mailer_1 = require("../utils/mailer");
 const router = (0, express_1.Router)();
@@ -333,6 +334,68 @@ router.delete('/:teamId/invites/:inviteId', auth_1.authenticateJWT, async (req, 
     }
     catch (error) {
         console.error('Revoke invite error:', error);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+// @route   GET /api/teams/:teamId/channels
+// @desc    Get all channels in the team. Auto-creates a General channel if none exist.
+router.get('/:teamId/channels', auth_1.authenticateJWT, async (req, res) => {
+    try {
+        const { teamId } = req.params;
+        const team = await Team_1.Team.findById(teamId);
+        if (!team) {
+            return res.status(404).json({ error: 'Team not found' });
+        }
+        const requester = team.members.find(m => m.user.toString() === req.userId);
+        if (!requester) {
+            return res.status(403).json({ error: 'Access denied: Not a member of this team' });
+        }
+        let channels = await Channel_1.Channel.find({ teamId });
+        if (channels.length === 0) {
+            const generalChannel = new Channel_1.Channel({
+                name: 'General',
+                description: 'Default general room for chat',
+                teamId: team._id,
+                createdBy: team.owner
+            });
+            await generalChannel.save();
+            channels = [generalChannel];
+        }
+        return res.status(200).json(channels);
+    }
+    catch (error) {
+        console.error('Get channels error:', error);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+// @route   POST /api/teams/:teamId/channels
+// @desc    Create a new channel in the team
+router.post('/:teamId/channels', auth_1.authenticateJWT, async (req, res) => {
+    try {
+        const { teamId } = req.params;
+        const { name, description } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ error: 'Channel name is required' });
+        }
+        const team = await Team_1.Team.findById(teamId);
+        if (!team) {
+            return res.status(404).json({ error: 'Team not found' });
+        }
+        const requester = team.members.find(m => m.user.toString() === req.userId);
+        if (!requester) {
+            return res.status(403).json({ error: 'Access denied: Not a member of this team' });
+        }
+        const newChannel = new Channel_1.Channel({
+            name: name.trim(),
+            description: description || '',
+            teamId: team._id,
+            createdBy: req.userId
+        });
+        await newChannel.save();
+        return res.status(201).json(newChannel);
+    }
+    catch (error) {
+        console.error('Create channel error:', error);
         return res.status(500).json({ error: 'Server error' });
     }
 });

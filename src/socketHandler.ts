@@ -235,7 +235,7 @@ export function initSocket(server: http.Server) {
           channelId = generalChannel._id.toString();
         }
 
-        let msg;
+        let msg: any = null;
         if (mongoose.connection.readyState === 1) {
           const created = await Message.create({
             teamId:      data.teamId,
@@ -274,43 +274,61 @@ export function initSocket(server: http.Server) {
           try {
             const team = await Team.findById(data.teamId).populate('members.user');
             if (team) {
-              const words = data.text.split(/\s+/);
               const mentionedUsers: any[] = [];
+              const messageTextLower = data.text.toLowerCase();
 
-              for (const word of words) {
-                if (word.startsWith('@')) {
-                  const mentionName = word.substring(1).replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
-                  for (const m of team.members) {
-                    const memberUser = m.user as any;
-                    if (memberUser && memberUser._id.toString() !== data.senderId) {
-                      const userNameNormalized = memberUser.name.replace(/\s+/g, '').toLowerCase();
-                      const userEmailNormalized = memberUser.email.split('@')[0].toLowerCase();
-                      if (userNameNormalized === mentionName || userEmailNormalized === mentionName || memberUser.name.toLowerCase() === mentionName) {
-                        if (!mentionedUsers.some(u => u._id.toString() === memberUser._id.toString())) {
-                          mentionedUsers.push(memberUser);
-                        }
-                      }
+              for (const m of team.members) {
+                const memberUser = m.user as any;
+                if (memberUser && memberUser._id.toString() !== data.senderId) {
+                  const nameLower = memberUser.name.toLowerCase();
+                  const emailNameLower = memberUser.email.split('@')[0].toLowerCase();
+                  const nameNormalizedLower = memberUser.name.replace(/\s+/g, '').toLowerCase();
+
+                  const mentionPatterns = [
+                    `@${nameLower}`,
+                    `@${emailNameLower}`,
+                    `@${nameNormalizedLower}`
+                  ];
+
+                  const isMentioned = mentionPatterns.some(pattern => {
+                    const idx = messageTextLower.indexOf(pattern);
+                    if (idx === -1) return false;
+
+                    const charBefore = idx > 0 ? messageTextLower[idx - 1] : '';
+                    const charAfter = messageTextLower[idx + pattern.length];
+
+                    const isCharBeforeSeparator = !charBefore || /[^a-zA-Z0-9._-]/.test(charBefore);
+                    const isCharAfterSeparator = !charAfter || /[^a-zA-Z0-9._-]/.test(charAfter);
+
+                    return isCharBeforeSeparator && isCharAfterSeparator;
+                  });
+
+                  if (isMentioned) {
+                    if (!mentionedUsers.some(u => u._id.toString() === memberUser._id.toString())) {
+                      mentionedUsers.push(memberUser);
                     }
                   }
                 }
               }
 
-              for (const recipient of mentionedUsers) {
-                const notif = await Notification.create({
-                  recipient: recipient._id,
-                  sender: data.senderId,
-                  teamId: data.teamId,
-                  channelId: channelId || undefined,
-                  messageId: msg._id,
-                  text: data.text || 'Mentioned you in chat',
-                });
+              if (msg && msg._id) {
+                for (const recipient of mentionedUsers) {
+                  const notif = await Notification.create({
+                    recipient: recipient._id,
+                    sender: data.senderId,
+                    teamId: data.teamId,
+                    channelId: channelId || undefined,
+                    messageId: msg._id,
+                    text: data.text || 'Mentioned you in chat',
+                  });
 
-                const populatedNotif = await Notification.findById(notif._id)
-                  .populate('sender', 'name avatarUrl')
-                  .populate('teamId', 'name')
-                  .populate('channelId', 'name');
+                  const populatedNotif = await Notification.findById(notif._id)
+                    .populate('sender', 'name avatarUrl')
+                    .populate('teamId', 'name')
+                    .populate('channelId', 'name');
 
-                io.to(`user:${recipient._id}`).emit('new_notification', populatedNotif);
+                  io.to(`user:${recipient._id}`).emit('new_notification', populatedNotif);
+                }
               }
             }
           } catch (mErr) {

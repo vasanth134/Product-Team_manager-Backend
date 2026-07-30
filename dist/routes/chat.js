@@ -10,6 +10,8 @@ const fs_1 = __importDefault(require("fs"));
 const cloudinary_1 = require("cloudinary");
 const Message_1 = require("../models/Message");
 const Team_1 = require("../models/Team");
+const Channel_1 = require("../models/Channel");
+const Notification_1 = require("../models/Notification");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 // ─── Cloudinary Setup ────────────────────────────────────────────────────────
@@ -77,10 +79,10 @@ async function userBelongsToTeam(userId, teamId) {
     const team = await Team_1.Team.findOne({ _id: teamId, 'members.user': userId });
     return !!team;
 }
-// ─── GET /api/chat/messages?teamId=xxx&before=<msgId>&limit=50 ───────────────
+// ─── GET /api/chat/messages?teamId=xxx&channelId=yyy&before=<msgId>&limit=50 ───────────────
 router.get('/messages', auth_1.authenticateJWT, async (req, res) => {
     try {
-        const { teamId, before, limit = '50' } = req.query;
+        const { teamId, channelId, before, limit = '50' } = req.query;
         if (!teamId)
             return res.status(400).json({ error: 'teamId is required' });
         // Validate team membership
@@ -88,6 +90,19 @@ router.get('/messages', auth_1.authenticateJWT, async (req, res) => {
             return res.status(403).json({ error: 'Access denied: You are not a member of this team' });
         }
         const query = { teamId };
+        if (channelId) {
+            const channel = await Channel_1.Channel.findById(channelId);
+            if (channel && channel.name === 'General') {
+                query.$or = [
+                    { channelId: channel._id },
+                    { channelId: { $exists: false } },
+                    { channelId: null }
+                ];
+            }
+            else {
+                query.channelId = channelId;
+            }
+        }
         if (before)
             query._id = { $lt: before };
         const messages = await Message_1.Message.find(query)
@@ -98,6 +113,39 @@ router.get('/messages', auth_1.authenticateJWT, async (req, res) => {
     }
     catch (error) {
         console.error('Fetch messages error:', error);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+// @route   GET /api/chat/notifications
+// @desc    Get unread notifications for current user
+router.get('/notifications', auth_1.authenticateJWT, async (req, res) => {
+    try {
+        const notifications = await Notification_1.Notification.find({ recipient: req.userId, isRead: false })
+            .populate('sender', 'name avatarUrl')
+            .populate('teamId', 'name')
+            .populate('channelId', 'name')
+            .sort({ createdAt: -1 });
+        return res.status(200).json(notifications);
+    }
+    catch (error) {
+        console.error('Fetch notifications error:', error);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+// @route   POST /api/chat/notifications/mark-read
+// @desc    Mark notifications as read
+router.post('/notifications/mark-read', auth_1.authenticateJWT, async (req, res) => {
+    try {
+        const { notificationIds } = req.body;
+        const query = { recipient: req.userId };
+        if (Array.isArray(notificationIds) && notificationIds.length > 0) {
+            query._id = { $in: notificationIds };
+        }
+        await Notification_1.Notification.updateMany(query, { $set: { isRead: true } });
+        return res.status(200).json({ success: true });
+    }
+    catch (error) {
+        console.error('Mark notifications read error:', error);
         return res.status(500).json({ error: 'Server error' });
     }
 });

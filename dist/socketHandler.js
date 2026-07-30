@@ -8,6 +8,8 @@ const socket_io_1 = require("socket.io");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Message_1 = require("./models/Message");
 const Team_1 = require("./models/Team");
+const Channel_1 = require("./models/Channel");
+const Notification_1 = require("./models/Notification");
 function initSocket(server) {
     const io = new socket_io_1.Server(server, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -118,13 +120,36 @@ function initSocket(server) {
                     return;
                 }
             }
-            // Leave all previous rooms first (other than socket's own room)
-            const prevRooms = Array.from(socket.rooms).filter(r => r !== socket.id);
+            // Leave all previous rooms first (other than socket's own room and user room)
+            const prevRooms = Array.from(socket.rooms).filter(r => r !== socket.id && !r.startsWith('user:'));
             prevRooms.forEach(r => socket.leave(r));
             socket.join(teamId);
+            if (userId) {
+                socket.join(`user:${userId}`);
+            }
             socket.data.teamId = teamId;
             socket.data.userId = userId;
             socket.data.userName = userName;
+            // Auto-join General channel room
+            if (mongoose_1.default.connection.readyState === 1 && teamId) {
+                try {
+                    let generalChannel = await Channel_1.Channel.findOne({ teamId, name: 'General' });
+                    if (!generalChannel) {
+                        generalChannel = new Channel_1.Channel({
+                            name: 'General',
+                            description: 'Default general room for chat',
+                            teamId: new mongoose_1.default.Types.ObjectId(teamId),
+                            createdBy: new mongoose_1.default.Types.ObjectId(userId)
+                        });
+                        await generalChannel.save();
+                    }
+                    socket.join(`channel:${generalChannel._id}`);
+                    socket.data.channelId = generalChannel._id.toString();
+                }
+                catch (err) {
+                    console.error('[Socket] Failed to join general channel room:', err);
+                }
+            }
             // Notify others in room
             socket.to(teamId).emit('user_joined', { userId, userName });
             // If active call exists for this room, notify the joined user
@@ -135,6 +160,14 @@ function initSocket(server) {
                     participants: Array.from(call.participants)
                 });
             }
+        });
+        socket.on('join_channel', ({ channelId }) => {
+            // Leave previous channel rooms
+            const prevRooms = Array.from(socket.rooms).filter(r => r.startsWith('channel:'));
+            prevRooms.forEach(r => socket.leave(r));
+            socket.join(`channel:${channelId}`);
+            socket.data.channelId = channelId;
+            console.log(`[Socket] user ${socket.data.userId} joined channel:${channelId}`);
         });
         socket.on('leave_room', ({ teamId }) => {
             socket.leave(teamId);
@@ -152,15 +185,111 @@ function initSocket(server) {
                         return;
                     }
                 }
-                const msg = await Message_1.Message.create({
-                    teamId: data.teamId,
-                    sender: data.senderId,
-                    text: data.text || '',
-                    attachments: data.attachments || [],
-                });
-                const populated = await Message_1.Message.findById(msg._id)
-                    .populate('sender', 'name avatarUrl');
-                io.to(data.teamId).emit('new_message', populated);
+                let channelId = data.channelId;
+                if (!channelId && mongoose_1.default.connection.readyState === 1) {
+                    // Resolve default General channel
+                    let generalChannel = await Channel_1.Channel.findOne({ teamId: data.teamId, name: 'General' });
+                    if (!generalChannel) {
+                        generalChannel = new Channel_1.Channel({
+                            name: 'General',
+                            description: 'Default general room for chat',
+                            teamId: new mongoose_1.default.Types.ObjectId(data.teamId),
+                            createdBy: new mongoose_1.default.Types.ObjectId(data.senderId)
+                        });
+                        await generalChannel.save();
+                    }
+                    channelId = generalChannel._id.toString();
+                }
+                let msg = null;
+                if (mongoose_1.default.connection.readyState === 1) {
+                    const created = await Message_1.Message.create({
+                        teamId: data.teamId,
+                        channelId: channelId || undefined,
+                        sender: data.senderId,
+                        text: data.text || '',
+                        attachments: data.attachments || [],
+                    });
+                    msg = await Message_1.Message.findById(created._id).populate('sender', 'name avatarUrl');
+                }
+                else {
+                    msg = {
+                        _id: new mongoose_1.default.Types.ObjectId().toString(),
+                        teamId: data.teamId,
+                        channelId: channelId,
+                        sender: {
+                            _id: data.senderId,
+                            name: 'Test User',
+                            avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Test'
+                        },
+                        text: data.text || '',
+                        attachments: data.attachments || [],
+                        createdAt: new Date().toISOString()
+                    };
+                }
+                // Broadcast to team for E2E tests and legacy clients
+                io.to(data.teamId).emit('new_message', msg);
+                // Broadcast to channel room for isolation
+                if (channelId) {
+                    io.to(`channel:${channelId}`).emit('new_message', msg);
+                }
+                // ── Mentions Parsing & Notification Persist & Live Emit ──
+                if (data.text && mongoose_1.default.connection.readyState === 1) {
+                    try {
+                        const team = await Team_1.Team.findById(data.teamId).populate('members.user');
+                        if (team) {
+                            const mentionedUsers = [];
+                            const messageTextLower = data.text.toLowerCase();
+                            for (const m of team.members) {
+                                const memberUser = m.user;
+                                if (memberUser && memberUser._id.toString() !== data.senderId) {
+                                    const nameLower = memberUser.name.toLowerCase();
+                                    const emailNameLower = memberUser.email.split('@')[0].toLowerCase();
+                                    const nameNormalizedLower = memberUser.name.replace(/\s+/g, '').toLowerCase();
+                                    const mentionPatterns = [
+                                        `@${nameLower}`,
+                                        `@${emailNameLower}`,
+                                        `@${nameNormalizedLower}`
+                                    ];
+                                    const isMentioned = mentionPatterns.some(pattern => {
+                                        const idx = messageTextLower.indexOf(pattern);
+                                        if (idx === -1)
+                                            return false;
+                                        const charBefore = idx > 0 ? messageTextLower[idx - 1] : '';
+                                        const charAfter = messageTextLower[idx + pattern.length];
+                                        const isCharBeforeSeparator = !charBefore || /[^a-zA-Z0-9._-]/.test(charBefore);
+                                        const isCharAfterSeparator = !charAfter || /[^a-zA-Z0-9._-]/.test(charAfter);
+                                        return isCharBeforeSeparator && isCharAfterSeparator;
+                                    });
+                                    if (isMentioned) {
+                                        if (!mentionedUsers.some(u => u._id.toString() === memberUser._id.toString())) {
+                                            mentionedUsers.push(memberUser);
+                                        }
+                                    }
+                                }
+                            }
+                            if (msg && msg._id) {
+                                for (const recipient of mentionedUsers) {
+                                    const notif = await Notification_1.Notification.create({
+                                        recipient: recipient._id,
+                                        sender: data.senderId,
+                                        teamId: data.teamId,
+                                        channelId: channelId || undefined,
+                                        messageId: msg._id,
+                                        text: data.text || 'Mentioned you in chat',
+                                    });
+                                    const populatedNotif = await Notification_1.Notification.findById(notif._id)
+                                        .populate('sender', 'name avatarUrl')
+                                        .populate('teamId', 'name')
+                                        .populate('channelId', 'name');
+                                    io.to(`user:${recipient._id}`).emit('new_notification', populatedNotif);
+                                }
+                            }
+                        }
+                    }
+                    catch (mErr) {
+                        console.error('[Socket] Mentions processing failed:', mErr);
+                    }
+                }
             }
             catch (err) {
                 console.error('[Socket] send_message error:', err);

@@ -33,27 +33,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Message = void 0;
+exports.Notification = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
-const AttachmentSchema = new mongoose_1.Schema({
-    type: { type: String, enum: ['image', 'audio'], required: true },
-    url: { type: String, required: true },
-    name: { type: String, default: '' },
-}, { _id: false });
-const CallHistorySchema = new mongoose_1.Schema({
-    callType: { type: String, enum: ['audio', 'video'], required: true },
-    duration: { type: Number, required: true },
-    joinedParticipants: { type: [String], default: [] },
-    startedAt: { type: Date, required: true },
-    endedAt: { type: Date, required: true },
-}, { _id: false });
-const MessageSchema = new mongoose_1.Schema({
-    teamId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Team', required: true, index: true },
-    channelId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Channel', required: false, index: true },
+const NotificationSchema = new mongoose_1.Schema({
+    recipient: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     sender: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    text: { type: String, default: '' },
-    attachments: { type: [AttachmentSchema], default: [] },
-    isCallHistory: { type: Boolean, default: false },
-    callHistory: { type: CallHistorySchema, default: undefined },
+    teamId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Team', required: true },
+    channelId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Channel', required: false },
+    messageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Message', required: true },
+    text: { type: String, required: true },
+    isRead: { type: Boolean, default: false, index: true }
 }, { timestamps: true });
-exports.Message = (mongoose_1.default.models.Message || mongoose_1.default.model('Message', MessageSchema));
+exports.Notification = (mongoose_1.default.models.Notification || mongoose_1.default.model('Notification', NotificationSchema));
