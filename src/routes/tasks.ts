@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Task } from '../models/Task';
 import { Team } from '../models/Team';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
+import { sendPushNotification } from '../utils/webPush';
 
 const router = Router();
 
@@ -88,6 +89,17 @@ router.post('/', authenticateJWT, async (req: AuthRequest, res): Promise<any> =>
       .populate('assignee', 'name email avatarUrl')
       .populate('milestoneId', 'title status');
 
+    if (task.assignee && task.assignee.toString() !== req.userId) {
+      sendPushNotification(task.assignee.toString(), {
+        title: 'New Task Assigned',
+        body: `You have been assigned: "${task.title}"`,
+        data: {
+          taskId: task._id,
+          url: `/`
+        }
+      }).catch(pErr => console.error('[Push] Task assign notification failed:', pErr));
+    }
+
     return res.status(201).json(populated);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -115,6 +127,7 @@ router.put('/:taskId', authenticateJWT, async (req: AuthRequest, res): Promise<a
     }
 
     // Apply updates
+    const originalAssignee = task.assignee?.toString() || null;
     if (body.title !== undefined) task.title = body.title;
     if (body.description !== undefined) task.description = body.description;
     if (body.status !== undefined) task.status = body.status;
@@ -129,6 +142,18 @@ router.put('/:taskId', authenticateJWT, async (req: AuthRequest, res): Promise<a
     const populated = await Task.findById(task._id)
       .populate('assignee', 'name email avatarUrl')
       .populate('milestoneId', 'title status');
+
+    const newAssignee = task.assignee?.toString() || null;
+    if (newAssignee && newAssignee !== req.userId && newAssignee !== originalAssignee) {
+      sendPushNotification(newAssignee, {
+        title: 'Task Assigned to You',
+        body: `Task assigned: "${task.title}"`,
+        data: {
+          taskId: task._id,
+          url: `/`
+        }
+      }).catch(pErr => console.error('[Push] Task assign notification failed:', pErr));
+    }
 
     return res.status(200).json(populated);
   } catch (error) {

@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 const Task_1 = require("../models/Task");
 const Team_1 = require("../models/Team");
 const auth_1 = require("../middleware/auth");
+const webPush_1 = require("../utils/webPush");
 const router = (0, express_1.Router)();
 const createTaskSchema = zod_1.z.object({
     teamId: zod_1.z.string(),
@@ -77,6 +78,16 @@ router.post('/', auth_1.authenticateJWT, async (req, res) => {
         const populated = await Task_1.Task.findById(task._id)
             .populate('assignee', 'name email avatarUrl')
             .populate('milestoneId', 'title status');
+        if (task.assignee && task.assignee.toString() !== req.userId) {
+            (0, webPush_1.sendPushNotification)(task.assignee.toString(), {
+                title: 'New Task Assigned',
+                body: `You have been assigned: "${task.title}"`,
+                data: {
+                    taskId: task._id,
+                    url: `/`
+                }
+            }).catch(pErr => console.error('[Push] Task assign notification failed:', pErr));
+        }
         return res.status(201).json(populated);
     }
     catch (error) {
@@ -101,6 +112,7 @@ router.put('/:taskId', auth_1.authenticateJWT, async (req, res) => {
             return res.status(403).json({ error: 'Access denied to this team' });
         }
         // Apply updates
+        const originalAssignee = task.assignee?.toString() || null;
         if (body.title !== undefined)
             task.title = body.title;
         if (body.description !== undefined)
@@ -121,6 +133,17 @@ router.put('/:taskId', auth_1.authenticateJWT, async (req, res) => {
         const populated = await Task_1.Task.findById(task._id)
             .populate('assignee', 'name email avatarUrl')
             .populate('milestoneId', 'title status');
+        const newAssignee = task.assignee?.toString() || null;
+        if (newAssignee && newAssignee !== req.userId && newAssignee !== originalAssignee) {
+            (0, webPush_1.sendPushNotification)(newAssignee, {
+                title: 'Task Assigned to You',
+                body: `Task assigned: "${task.title}"`,
+                data: {
+                    taskId: task._id,
+                    url: `/`
+                }
+            }).catch(pErr => console.error('[Push] Task assign notification failed:', pErr));
+        }
         return res.status(200).json(populated);
     }
     catch (error) {

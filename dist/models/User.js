@@ -41,5 +41,12 @@ const UserSchema = new mongoose_1.Schema({
     passwordHash: { type: String, required: true },
     avatarUrl: { type: String, default: '' },
     role: { type: String, default: 'Developer' },
+    pushSubscriptions: [{
+            endpoint: { type: String, required: true },
+            keys: {
+                p256dh: { type: String, required: true },
+                auth: { type: String, required: true }
+            }
+        }]
 }, { timestamps: true });
 exports.User = (mongoose_1.default.models.User || mongoose_1.default.model('User', UserSchema));

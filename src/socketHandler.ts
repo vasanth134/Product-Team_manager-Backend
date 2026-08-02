@@ -6,6 +6,7 @@ import { Team } from './models/Team';
 import { Channel } from './models/Channel';
 import { Notification } from './models/Notification';
 import { User } from './models/User';
+import { sendPushNotification } from './utils/webPush';
 
 export function initSocket(server: http.Server) {
   const io = new Server(server, {
@@ -277,6 +278,9 @@ export function initSocket(server: http.Server) {
               const mentionedUsers: any[] = [];
               const messageTextLower = data.text.toLowerCase();
 
+              const channelObj = channelId ? await Channel.findById(channelId) : null;
+              const channelName = channelObj ? channelObj.name : 'General';
+
               for (const m of team.members) {
                 const memberUser = m.user as any;
                 if (memberUser && memberUser._id.toString() !== data.senderId) {
@@ -308,6 +312,21 @@ export function initSocket(server: http.Server) {
                       mentionedUsers.push(memberUser);
                     }
                   }
+
+                  sendPushNotification(memberUser._id.toString(), {
+                    title: isMentioned 
+                      ? `Mentioned in #${channelName}` 
+                      : `New message in #${channelName}`,
+                    body: `${msg?.sender?.name || 'Someone'}: ${data.text || ''}`,
+                    data: {
+                      teamId: data.teamId,
+                      channelId: channelId,
+                      url: '/'
+                    }
+                  }).catch(pErr => console.error('[Push] Failed to send push message:', pErr));
+
+                  // Emit via Socket.io to the user's personal room so they receive it in-app even if viewing a different workspace
+                  io.to(`user:${memberUser._id.toString()}`).emit('new_message', msg);
                 }
               }
 

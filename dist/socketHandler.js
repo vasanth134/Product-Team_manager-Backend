@@ -10,6 +10,7 @@ const Message_1 = require("./models/Message");
 const Team_1 = require("./models/Team");
 const Channel_1 = require("./models/Channel");
 const Notification_1 = require("./models/Notification");
+const webPush_1 = require("./utils/webPush");
 function initSocket(server) {
     const io = new socket_io_1.Server(server, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -239,6 +240,8 @@ function initSocket(server) {
                         if (team) {
                             const mentionedUsers = [];
                             const messageTextLower = data.text.toLowerCase();
+                            const channelObj = channelId ? await Channel_1.Channel.findById(channelId) : null;
+                            const channelName = channelObj ? channelObj.name : 'General';
                             for (const m of team.members) {
                                 const memberUser = m.user;
                                 if (memberUser && memberUser._id.toString() !== data.senderId) {
@@ -265,6 +268,19 @@ function initSocket(server) {
                                             mentionedUsers.push(memberUser);
                                         }
                                     }
+                                    (0, webPush_1.sendPushNotification)(memberUser._id.toString(), {
+                                        title: isMentioned
+                                            ? `Mentioned in #${channelName}`
+                                            : `New message in #${channelName}`,
+                                        body: `${msg?.sender?.name || 'Someone'}: ${data.text || ''}`,
+                                        data: {
+                                            teamId: data.teamId,
+                                            channelId: channelId,
+                                            url: '/'
+                                        }
+                                    }).catch(pErr => console.error('[Push] Failed to send push message:', pErr));
+                                    // Emit via Socket.io to the user's personal room so they receive it in-app even if viewing a different workspace
+                                    io.to(`user:${memberUser._id.toString()}`).emit('new_message', msg);
                                 }
                             }
                             if (msg && msg._id) {

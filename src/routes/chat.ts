@@ -7,6 +7,7 @@ import { Message } from '../models/Message';
 import { Team } from '../models/Team';
 import { Channel } from '../models/Channel';
 import { Notification } from '../models/Notification';
+import { User } from '../models/User';
 import { authenticateJWT, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -154,6 +155,43 @@ router.post('/notifications/mark-read', authenticateJWT, async (req: AuthRequest
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('Mark notifications read error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   POST /api/chat/notifications/subscribe
+// @desc    Register a new push subscription for the authenticated user
+router.post('/notifications/subscribe', authenticateJWT, async (req: AuthRequest, res: Response): Promise<any> => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+      return res.status(400).json({ error: 'Invalid subscription payload' });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.pushSubscriptions) {
+      user.pushSubscriptions = [];
+    }
+
+    const exists = user.pushSubscriptions.some(sub => sub.endpoint === subscription.endpoint);
+    if (!exists) {
+      user.pushSubscriptions.push({
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: subscription.keys.p256dh,
+          auth: subscription.keys.auth
+        }
+      });
+      await user.save();
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Push notification subscription error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

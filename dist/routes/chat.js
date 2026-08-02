@@ -12,6 +12,7 @@ const Message_1 = require("../models/Message");
 const Team_1 = require("../models/Team");
 const Channel_1 = require("../models/Channel");
 const Notification_1 = require("../models/Notification");
+const User_1 = require("../models/User");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 // ─── Cloudinary Setup ────────────────────────────────────────────────────────
@@ -146,6 +147,39 @@ router.post('/notifications/mark-read', auth_1.authenticateJWT, async (req, res)
     }
     catch (error) {
         console.error('Mark notifications read error:', error);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+// @route   POST /api/chat/notifications/subscribe
+// @desc    Register a new push subscription for the authenticated user
+router.post('/notifications/subscribe', auth_1.authenticateJWT, async (req, res) => {
+    try {
+        const { subscription } = req.body;
+        if (!subscription || !subscription.endpoint || !subscription.keys) {
+            return res.status(400).json({ error: 'Invalid subscription payload' });
+        }
+        const user = await User_1.User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        if (!user.pushSubscriptions) {
+            user.pushSubscriptions = [];
+        }
+        const exists = user.pushSubscriptions.some(sub => sub.endpoint === subscription.endpoint);
+        if (!exists) {
+            user.pushSubscriptions.push({
+                endpoint: subscription.endpoint,
+                keys: {
+                    p256dh: subscription.keys.p256dh,
+                    auth: subscription.keys.auth
+                }
+            });
+            await user.save();
+        }
+        return res.status(200).json({ success: true });
+    }
+    catch (error) {
+        console.error('Push notification subscription error:', error);
         return res.status(500).json({ error: 'Server error' });
     }
 });
